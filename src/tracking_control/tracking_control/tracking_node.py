@@ -86,7 +86,7 @@ class TrackingNode(Node):
         self.timer = self.create_timer(0.01, self.timer_update)
     
     def detected_obs_pose_callback(self, msg):
-        #self.get_logger().info('Received Detected Object Pose')
+        self.get_logger().info('Received Detected Object Pose')
         
         odom_id = self.get_parameter('world_frame_id').get_parameter_value().string_value
         center_points = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
@@ -111,7 +111,7 @@ class TrackingNode(Node):
         self.obs_pose = cp_world
 
     def detected_goal_pose_callback(self, msg):
-        #self.get_logger().info('Received Detected Object Pose')
+        self.get_logger().info('Received Detected Goal Pose')
         
         odom_id = self.get_parameter('world_frame_id').get_parameter_value().string_value
         center_points = np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z])
@@ -149,10 +149,17 @@ class TrackingNode(Node):
             obstacle_pose = robot_world_R@self.obs_pose+np.array([robot_world_x,robot_world_y,robot_world_z])
             goal_pose = robot_world_R@self.goal_pose+np.array([robot_world_x,robot_world_y,robot_world_z])
     
-        
+        except ValueError as e:
+            self.get_logger().error('Value error: ' + str(e))
+            return None, None
+
         except TransformException as e:
             self.get_logger().error('Transform error: ' + str(e))
-            return
+            return None, None
+
+        except Exception as e:
+            self.get_logger().error('Error: ' + str(e))
+            return None, None
         
         return obstacle_pose, goal_pose
     
@@ -163,23 +170,25 @@ class TrackingNode(Node):
         # But, you may want to think about what to do in this case
         # and update the command velocity accordingly
         if self.goal_pose is None:
+            self.get_logger().info("goal_pose is None")
             cmd_vel = Twist()
             cmd_vel.linear.x = 0.0
             cmd_vel.angular.z = 0.0
             self.pub_control_cmd.publish(cmd_vel)
             return
+        self.get_logger().info("goal_pose is NOT None")
         
         # Get the current object pose in the robot base_footprint frame
         current_obs_pose, current_goal_pose = self.get_current_poses()
         
         # TODO: get the control velocity command
-        cmd_vel = self.controller()
+        cmd_vel = self.controller(current_obs_pose, current_goal_pose)
         
         # publish the control command
         self.pub_control_cmd.publish(cmd_vel)
         #################################################
     
-    def controller(self):
+    def controller(self, current_obs_pose, current_goal_pose):
         # Instructions: You can implement your own control algorithm here
         # feel free to modify the code structure, add more parameters, more input variables for the function, etc.
         
@@ -187,9 +196,9 @@ class TrackingNode(Node):
         
         # TODO: Update the control velocity command
         cmd_vel = Twist()
-        cmd_vel.linear.x = 0
-        cmd_vel.linear.y = 0
-        cmd_vel.angular.z = 0
+        cmd_vel.linear.x = 100.0
+        cmd_vel.linear.y = 100.0
+        cmd_vel.angular.z = 100.0
         return cmd_vel
     
         ############################################
