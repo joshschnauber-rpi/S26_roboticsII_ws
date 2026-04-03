@@ -47,6 +47,12 @@ def q2R(q):
     qhat2 = qhat.dot(qhat)
     return I + 2*q[0]*qhat + 2*qhat2
 ######################
+def cap_length(v, l):
+    norm = np.norm(v)
+    if norm <= l:
+        return v
+    return (v / norm) * l
+
 
 def euler_from_quaternion(q):
     w=q[0]
@@ -206,9 +212,9 @@ class TrackingNode(Node):
             return Twist()
 
         # Constants
-        BUFFER = 0.2
+        BUFFER_DISTANCE = 0.2
         K_V1 = 0.1
-        K_V2 = 0.05
+        K_V2 = 0.2
         MAX_V = 5
 
         # Decide which pose to move towards
@@ -223,14 +229,13 @@ class TrackingNode(Node):
         goal_dir = goal_diff / goal_d
 
         # If at target
-        if d <= BUFFER:
+        if d <= BUFFER_DISTANCE:
             if not reached_goal:
                 reached_goal = True
             return Twist()
                 
         # Determine straight line velocity
-        s = max(d * K_V1, MAX_V)
-        v = s * goal_dir
+        v = d * K_V1 * goal_dir
 
         # If there is an object, direct away from it
         if current_obs_pose != None:
@@ -249,8 +254,12 @@ class TrackingNode(Node):
             # Update velocity to move away from object
             s_mod = (1 / obj_d) * K_V2
             v_mod = s_mod * perp
-            v += v_mod
+            if obj_d <= BUFFER_DISTANCE:
+                v = v_mod
+            else:
+                v = v + v_mod
 
+        v = cap_length(v, MAX_V)
         cmd_vel = Twist()
         cmd_vel.linear.x = v[0]
         cmd_vel.linear.y = v[1]
