@@ -139,30 +139,36 @@ class TrackingNode(Node):
         
         odom_id = self.get_parameter('world_frame_id').get_parameter_value().string_value
         # Get the current robot pose
+        robot_pose = None
+        obstacle_pose = None
+        goal_pose = None
         try:
             # from base_footprint to odom
             transform = self.tf_buffer.lookup_transform('base_footprint', odom_id, rclpy.time.Time())
             robot_world_x = transform.transform.translation.x
             robot_world_y = transform.transform.translation.y
             robot_world_z = transform.transform.translation.z
+            robot_pose = np.array([robot_world_x, robot_world_y, robot_world_z])
             robot_world_R = q2R([transform.transform.rotation.w, transform.transform.rotation.x, transform.transform.rotation.y, transform.transform.rotation.z])
-            obstacle_pose = robot_world_R@self.obs_pose+np.array([robot_world_x,robot_world_y,robot_world_z])
-            goal_pose = robot_world_R@self.goal_pose+np.array([robot_world_x,robot_world_y,robot_world_z])
-    
+            
+            if self.obs_pose != None:
+                obstacle_pose = robot_world_R @ self.obs_pose + robot_pose
+
+            if self.goal_pose != None:
+                goal_pose = robot_world_R @ self.goal_pose + robot_pose
+                
         except ValueError as e:
             self.get_logger().error('Value error: ' + str(e))
-            return None, None
 
         except TransformException as e:
             self.get_logger().error('Transform error: ' + str(e))
-            return None, None
 
         except Exception as e:
             self.get_logger().error('Error: ' + str(e))
-            return None, None
         
-        return obstacle_pose, goal_pose
+        return robot_pose, obstacle_pose, goal_pose
     
+    start_pose = None
     def timer_update(self):
         ################### Write your code here ###################
         
@@ -170,35 +176,86 @@ class TrackingNode(Node):
         # But, you may want to think about what to do in this case
         # and update the command velocity accordingly
         if self.goal_pose is None:
-            self.get_logger().info("goal_pose is None")
+            # Spin in place until the goal is seen
             cmd_vel = Twist()
             cmd_vel.linear.x = 0.0
-            cmd_vel.angular.z = 0.0
+            cmd_vel.angular.z = 2.0
             self.pub_control_cmd.publish(cmd_vel)
             return
-        self.get_logger().info("goal_pose is NOT None")
         
         # Get the current object pose in the robot base_footprint frame
-        current_obs_pose, current_goal_pose = self.get_current_poses()
+        robot_pose, current_obs_pose, current_goal_pose = self.get_current_poses()
         
-        # TODO: get the control velocity command
-        cmd_vel = self.controller(current_obs_pose, current_goal_pose)
+        if start_pose == None and robot_pose != None:
+            start_pose = robot_pose
+
+        # Get the control velocity command
+        cmd_vel = self.controller(robot_pose, current_obs_pose, current_goal_pose)
         
         # publish the control command
         self.pub_control_cmd.publish(cmd_vel)
         #################################################
     
-    def controller(self, current_obs_pose, current_goal_pose):
+    reached_goal = False
+    def controller(self, robot_pose, current_obs_pose, current_goal_pose):
         # Instructions: You can implement your own control algorithm here
         # feel free to modify the code structure, add more parameters, more input variables for the function, etc.
         
-        ########### Write your code here ###########
-        
-        # TODO: Update the control velocity command
+        # If the robot or goal position is unknown, don't move
+        if robot_pose == None or current_goal_pose == None:
+            return Twist()
+
+        # Constants
+        BUFFER = 0.2
+        K_V1 = 0.1
+        K_V2 = 0.05
+        MAX_V = 5
+
+        # Decide which pose to move towards
+        if reached_goal
+            target_pose = start_pose
+        else
+            target_pose = current_goal_pose
+
+        # Determine distance and direction to target
+        goal_diff = robot_pose - current_goal_pose
+        goal_d = np.norm(goal_diff)
+        goal_dir = goal_diff / goal_d
+
+        # If at target
+        if d <= BUFFER:
+            if not reached_goal:
+                reached_goal = True
+            return Twist()
+                
+        # Determine straight line velocity
+        s = max(d * K_V1, MAX_V)
+        v = s * goal_dir
+
+        # If there is an object, direct away from it
+        if current_obs_pose != None:
+            obj_diff = robot_pose - current_obj_pose
+            obj_d = np.norm(obj_diff)
+            obj_dir = obj_diff / obj_d
+
+            # Get perpendicular vector to movement
+            perp1 = np.array([-goal_dir[1], goal_dir[0], goal_dir[2]])
+            perp2 = np.array([goal_dir[1], -goal_dir[0], goal_dir[2]])
+            if np.dot(perp1, obj_dir) > 0:
+                perp = perp1
+            else:
+                perp = perp2
+
+            # Update velocity to move away from object
+            s_mod = (1 / obj_d) * K_V2
+            v_mod = s_mod * perp
+            v += v_mod
+
         cmd_vel = Twist()
-        cmd_vel.linear.x = 100.0
-        cmd_vel.linear.y = 100.0
-        cmd_vel.angular.z = 100.0
+        cmd_vel.linear.x = v[0]
+        cmd_vel.linear.y = v[1]
+        cmd_vel.linear.z = v[2]
+        cmd_vel.angular.z = 0.0
         return cmd_vel
     
         ############################################
