@@ -183,7 +183,7 @@ class TrackingNode(Node):
         # Now, the robot stops if the object is not detected
         # But, you may want to think about what to do in this case
         # and update the command velocity accordingly
-        if self.goal_pose is None or True:
+        if self.goal_pose is None:
             # Spin in place until the goal is seen
             cmd_vel = Twist()
             cmd_vel.linear.x = 0.0
@@ -216,9 +216,9 @@ class TrackingNode(Node):
         # Constants
         GOAL_DISTANCE = 0.3
         OBS_DISTANCE = 0.1
-        K_V1 = 0.05
+        K_V1 = 0.2
         K_V2 = 0.1
-        MAX_V = 0.1
+        MAX_V = 1
 
         # Decide which pose to move towards
         if self.reached_goal:
