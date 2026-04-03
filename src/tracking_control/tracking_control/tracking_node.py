@@ -72,7 +72,7 @@ class TrackingNode(Node):
         self.get_logger().info('Tracking Node Started')
         
         # Current object pose
-        self.start_pose = None
+        self.start_global_pos = None
         self.obs_pose = None
         self.goal_pose = None
 
@@ -104,8 +104,8 @@ class TrackingNode(Node):
         # You can decide to filter the detected object pose here
         # For example, you can filter the pose based on the distance from the camera
         # or the height of the object
-        # if np.linalg.norm(center_points) > 3 or center_points[2] > 0.7:
-        #     return
+        if np.linalg.norm(center_points) > 3 or center_points[2] > 0.7:
+            return
         
         try:
             # Transform the center point from the camera frame to the world frame
@@ -129,8 +129,8 @@ class TrackingNode(Node):
         # You can decide to filter the detected object pose here
         # For example, you can filter the pose based on the distance from the camera
         # or the height of the object
-        # if np.linalg.norm(center_points) > 3 or center_points[2] > 0.7:
-        #     return
+        if np.linalg.norm(center_points) > 3 or center_points[2] > 0.7:
+            return
         
         try:
             # Transform the center point from the camera frame to the world frame
@@ -188,15 +188,15 @@ class TrackingNode(Node):
             cmd_vel = Twist()
             cmd_vel.linear.x = 0.0
             cmd_vel.linear.y = 0.0
-            cmd_vel.angular.z = 0.05
+            cmd_vel.angular.z = 0.25
             self.pub_control_cmd.publish(cmd_vel)
             return
         
         # Get the current object pose in the robot base_footprint frame
         robot_pose, current_obs_pose, current_goal_pose = self.get_current_poses()
         
-        if self.start_pose is None and robot_pose is not None:
-            self.start_pose = robot_pose
+        if self.start_global_pos is None and robot_pose is not None:
+            self.start_global_pos = robot_pose
 
         # Get the control velocity command
         cmd_vel = self.controller(robot_pose, current_obs_pose, current_goal_pose)
@@ -205,54 +205,55 @@ class TrackingNode(Node):
         self.pub_control_cmd.publish(cmd_vel)
         #################################################
     
-    def controller(self, robot_pose, current_obs_pose, current_goal_pose):
+    def controller(self, current_robot_global_pos, current_obs_pose, current_goal_pose):
         # Instructions: You can implement your own control algorithm here
         # feel free to modify the code structure, add more parameters, more input variables for the function, etc.
         
         # If the robot or goal position is unknown, don't move
-        if robot_pose is None or current_goal_pose is None:
+        if current_robot_global_pos is None or current_goal_pose is None:
             return Twist()
 
         # Constants
-        GOAL_DISTANCE = 0.3
+        TARGET_DISTANCE = 0.3
         OBS_DISTANCE = 0.1
         K_V1 = 0.2
-        K_V2 = 0.1
-        MAX_V = 1
+        K_V2 = 0.03
+        K_V3 = 0.05
+        MAX_V = 0.75
 
         # Decide which pose to move towards
         if self.reached_goal:
-            target_pose = self.start_pose
+            target_pose = current_robot_global_pos - self.start_global_pos
         else:
             target_pose = current_goal_pose
 
         # Determine distance and direction to target
-        goal_diff = robot_pose - current_goal_pose
-        goal_d = np.linalg.norm(goal_diff)
-        goal_dir = goal_diff / goal_d
+        target_diff = target_pose - np.array([0, 0, 0])
+        target_d = np.linalg.norm(target_diff)
+        target_dir = target_diff / target_d
 
         # If at target
-        if goal_d <= GOAL_DISTANCE:
+        if target_d <= TARGET_DISTANCE:
             if not self.reached_goal:
                 self.reached_goal = True
             return Twist()
                 
         # Determine straight line velocity
-        v = goal_d * K_V1 * goal_dir
+        v = target_d * K_V1 * target_dir
 
         # If there is an object, direct away from it
         if current_obs_pose is not None:
-            obj_diff = robot_pose - current_obs_pose
+            obj_diff = current_obs_pose - np.array([0, 0, 0])
             obj_d = np.linalg.norm(obj_diff)
             obj_dir = obj_diff / obj_d
 
             # Get perpendicular vector to movement
-            perp1 = np.array([-goal_dir[1], goal_dir[0], goal_dir[2]])
-            perp2 = np.array([goal_dir[1], -goal_dir[0], goal_dir[2]])
+            perp1 = np.array([-target_dir[1], target_dir[0], target_dir[2]])
+            perp2 = np.array([target_dir[1], -target_dir[0], target_dir[2]])
             if (perp1[0]*obj_dir[0] + perp1[1]*obj_dir[1]) > 0:
-                perp = perp1
-            else:
                 perp = perp2
+            else:
+                perp = perp1
 
             # Update velocity to move away from object
             s_mod = (1 / obj_d) * K_V2
