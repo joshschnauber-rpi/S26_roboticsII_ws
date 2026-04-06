@@ -213,13 +213,16 @@ class TrackingNode(Node):
         if current_robot_global_pos is None or current_goal_pose is None:
             return Twist()
 
+        odom_id = self.get_parameter('world_frame_id').get_parameter_value().string_value
         transform = self.tf_buffer.lookup_transform('base_footprint', odom_id, rclpy.time.Time())
-        current_robot_rotation = transform.transform.rotation.z
-        current_robot_heading = np.array({np.cos(current_robot_rotation), np.sin(current_robot_rotation)})
+        q = transform.transform.rotation
+        current_robot_yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y**2 + q.z**2))
+        current_robot_heading = np.array([np.cos(current_robot_yaw), np.sin(current_robot_yaw)])
 
         # Constants
         TARGET_DISTANCE = 0.3
         OBS_DISTANCE = 0.1
+        OBS_EFFECT_DISTANCE = 0.4
         K_V1 = 0.2
         K_V2 = 0.03
         K_V3 = 0.05
@@ -251,25 +254,27 @@ class TrackingNode(Node):
 
         # If there is an object, direct away from it
         if current_obs_pose is not None:
-            obj_diff = current_obs_pose - np.array([0, 0, 0])
-            obj_d = np.linalg.norm(obj_diff)
-            obj_dir = obj_diff / obj_d
+            obs_diff = current_obs_pose - np.array([0, 0, 0])
+            obs_d = np.linalg.norm(obs_diff)
+            obs_dir = obs_diff / obs_d
 
-            # Get perpendicular vector to movement
-            perp1 = np.array([-target_dir[1], target_dir[0], target_dir[2]])
-            perp2 = np.array([target_dir[1], -target_dir[0], target_dir[2]])
-            if (perp1[0]*obj_dir[0] + perp1[1]*obj_dir[1]) > 0:
-                perp = perp2
-            else:
-                perp = perp1
+            # If obstacle is behind, then don't bother avoiding
+            if np.dot(target_dir[:2], obs_dir[:2]) > 0:
+                # Get perpendicular vector to movement
+                perp1 = np.array([-target_dir[1], target_dir[0], target_dir[2]])
+                perp2 = np.array([target_dir[1], -target_dir[0], target_dir[2]])
+                if np.dot(perp1[:2], obs_dir[:2]) > 0:
+                    perp = perp2
+                else:
+                    perp = perp1
 
-            # Update velocity to move away from object
-            s_mod = (1 / obj_d) * K_V2
-            v_mod = s_mod * perp
-            if obj_d <= OBS_DISTANCE:
-                v = v_mod
-            else:
-                v = v + v_mod
+                # Update velocity to move away from object
+                s_mod = (1 / obs_d) * K_V2
+                v_mod = s_mod * perp
+                if obs_d <= OBS_DISTANCE:
+                    v = v_mod
+                elif obs_d <= OBS_EFFECT_DISTANCE:
+                    v = v + v_mod
 
         v = cap_length(v, MAX_V)
         cmd_vel = Twist()
