@@ -193,13 +193,13 @@ class TrackingNode(Node):
             return
         
         # Get the current object pose in the robot base_footprint frame
-        robot_pose, current_obs_pose, current_goal_pose = self.get_current_poses()
+        robot_global_pose, current_obs_pose, current_goal_pose = self.get_current_poses()
         
-        if self.start_global_pos is None and robot_pose is not None:
-            self.start_global_pos = robot_pose
+        if self.start_global_pos is None and robot_global_pose is not None:
+            self.start_global_pos = robot_global_pose
 
         # Get the control velocity command
-        cmd_vel = self.controller(robot_pose, current_obs_pose, current_goal_pose)
+        cmd_vel = self.controller(robot_global_pose, current_obs_pose, current_goal_pose)
         
         # publish the control command
         self.pub_control_cmd.publish(cmd_vel)
@@ -212,6 +212,10 @@ class TrackingNode(Node):
         # If the robot or goal position is unknown, don't move
         if current_robot_global_pos is None or current_goal_pose is None:
             return Twist()
+
+        transform = self.tf_buffer.lookup_transform('base_footprint', odom_id, rclpy.time.Time())
+        current_robot_rotation = transform.transform.rotation.z
+        current_robot_heading = np.array({np.cos(current_robot_rotation), np.sin(current_robot_rotation)})
 
         # Constants
         TARGET_DISTANCE = 0.3
@@ -232,6 +236,8 @@ class TrackingNode(Node):
         target_d = np.linalg.norm(target_diff)
         target_dir = target_diff / target_d
 
+        angle_d = current_robot_heading[0] * target_dir[1] - current_robot_heading[1] * target_dir[0]
+
         # If at target
         if target_d <= TARGET_DISTANCE:
             if not self.reached_goal:
@@ -240,6 +246,8 @@ class TrackingNode(Node):
                 
         # Determine straight line velocity
         v = target_d * K_V1 * target_dir
+        # Determine angular velocity
+        w = angle_d * K_V3
 
         # If there is an object, direct away from it
         if current_obs_pose is not None:
@@ -268,7 +276,7 @@ class TrackingNode(Node):
         cmd_vel.linear.x = v[0]
         cmd_vel.linear.y = v[1]
         cmd_vel.linear.z = v[2]
-        cmd_vel.angular.z = 0.0
+        cmd_vel.angular.z = w
         return cmd_vel
     
         ############################################
